@@ -36,6 +36,8 @@ REPORT_ONLY="false"
 SHOW_SIZE="false"
 GIT_CHECK="true"
 ASSUME_YES="false"
+SHOW_ALL_TYPES="false"
+SHOW_EXCLUDED="false"
 EXTRA_IGNORES=()
 
 # Override to test without touching real Time Machine state.
@@ -62,7 +64,7 @@ rule() {
 }
 
 # Shorten $HOME to ~ for display.
-tilde() { printf '%s' "${1/#$HOME/\~}"; }
+tilde() { printf '%s' "${1/#$HOME/~}"; }
 
 human_bytes() {
   awk -v b="$1" 'BEGIN{
@@ -83,6 +85,9 @@ Options:
   -s, --size          Show a size estimate per excluded directory (slower)
   -d, --depth N       How deep to search below each folder (default 6)
   -i, --ignore NAME   Never descend into directories with this name (repeatable)
+  -a, --all-types     List a project under every type it matches, instead of
+                      only the most specific one
+  -e, --show-excluded List the directories Time Machine is already skipping
       --no-git-check  Skip the "is it gitignored?" safety check
   -h, --help          Show this help
   -V, --version       Print version
@@ -116,6 +121,44 @@ type_label() {
     dotnet)       echo ".NET" ;;
     *)            echo "$1" ;;
   esac
+}
+
+# Which type each framework is built on top of. This is only used to decide
+# how a project is *listed*: a Next.js app also matches react and node, and
+# should be reported once, as the most specific thing it is. Artifact
+# collection still uses every type the project matched.
+type_parent() {
+  case "$1" in
+    react|vue|svelte|astro|angular) echo "node" ;;
+    nextjs)                         echo "react" ;;
+    nuxt)                           echo "vue" ;;
+    react_native)                   echo "react" ;;
+    *)                              echo "" ;;
+  esac
+}
+
+# Given every type a directory matched, print only the most specific ones:
+# any type that another match is built on is dropped. Unrelated stacks are
+# both kept - a Tauri app genuinely is a node project and a rust project.
+primary_types() {
+  local all="$1" t p depth ancestors=""
+
+  while IFS= read -r t; do
+    [[ -z "$t" ]] && continue
+    p="$(type_parent "$t")"
+    depth=0
+    while [[ -n "$p" && "$depth" -lt 8 ]]; do
+      ancestors="${ancestors}${p}"$'\n'
+      p="$(type_parent "$p")"
+      depth=$((depth + 1))
+    done
+  done <<< "$all"
+
+  while IFS= read -r t; do
+    [[ -z "$t" ]] && continue
+    printf '%s\n' "$ancestors" | grep -qxF "$t" && continue
+    printf '%s\n' "$t"
+  done <<< "$all"
 }
 
 # Directories each project type generates and can always rebuild.
@@ -381,6 +424,8 @@ while [[ $# -gt 0 ]]; do
     -y|--yes)         ASSUME_YES="true"; shift ;;
     -r|--report-only) REPORT_ONLY="true"; shift ;;
     -s|--size)        SHOW_SIZE="true"; shift ;;
+    -a|--all-types)   SHOW_ALL_TYPES="true"; shift ;;
+    -e|--show-excluded) SHOW_EXCLUDED="true"; shift ;;
     --no-git-check)   GIT_CHECK="false"; shift ;;
     -d|--depth)
       [[ "${2:-}" =~ ^[0-9]+$ ]] || die "--depth needs a number"
@@ -440,10 +485,15 @@ for raw_root in "${SEARCH_PATHS[@]}"; do
   while IFS= read -r dir; do
     types="$(detect_types "$dir")"
     [[ -z "$types" ]] && continue
+    if [[ "$SHOW_ALL_TYPES" == "true" ]]; then
+      listed="$types"
+    else
+      listed="$(primary_types "$types")"
+    fi
     while IFS= read -r t; do
       [[ -z "$t" ]] && continue
       printf '%s\t%s\t%s\n' "$t" "$(basename "$dir")" "$dir" >> "$PROJECTS"
-    done <<< "$types"
+    done <<< "$listed"
     collect_candidates "$dir" "$types"
   done < <(walk_dirs "$root")
 done
@@ -530,6 +580,16 @@ if [[ "$n_skipped" -gt 0 ]]; then
     while IFS=$'\t' read -r type path; do
       printf '  %s-%s %s%-14s%s %s\n' \
         "${C_YELLOW}" "${C_RESET}" "${C_DIM}" "$type" "${C_RESET}" "$(tilde "$path")"
+    done
+  echo ""
+fi
+
+if [[ "$SHOW_EXCLUDED" == "true" && "$n_already" -gt 0 ]]; then
+  rule "Already excluded (Time Machine is skipping these)"
+  awk -F'\t' '$1=="already" {print $2 "\t" $4}' "$PLAN" |
+    while IFS=$'\t' read -r type path; do
+      printf '  %s=%s %s%-14s%s %s\n' \
+        "${C_DIM}" "${C_RESET}" "${C_DIM}" "$type" "${C_RESET}" "$(tilde "$path")"
     done
   echo ""
 fi

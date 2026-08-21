@@ -211,8 +211,13 @@ backing them up.
 - Asks for `y/N` confirmation, and **only then** calls `tmutil addexclusion`.
 - Skips directories that are already excluded, so re-running it is safe and cheap.
 
-A project can match several types at once — a Flutter app is also an Android project — and
-gets the union of their artifact lists.
+Each project is listed **once**, under the most specific type it matches. A Next.js app
+also matches React and Node.js, but it is reported as Next.js, not all three. Genuinely
+unrelated stacks are still listed separately — a Tauri app appears under both React and
+Rust, because that is what it is. Pass `--all-types` to see every match instead.
+
+This affects the inventory only. Artifact detection still uses **every** type a project
+matched, so that Next.js app is still scanned for `node_modules` and `.next` alike.
 
 ### 🔍 Project Types Detected
 
@@ -275,6 +280,8 @@ You can pass several folders at once:
 | `-s`, `--size` | Show a size estimate per directory, and a total (slower) |
 | `-d`, `--depth N` | How deep to search below each folder (default 6) |
 | `-i`, `--ignore NAME` | Never descend into directories with this name (repeatable) |
+| `-a`, `--all-types` | List a project under every type it matches, not just the most specific |
+| `-e`, `--show-excluded` | List the directories Time Machine is already skipping |
 | `--no-git-check` | Skip the "is it gitignored?" safety check |
 | `-h`, `--help` | Show help |
 | `-V`, `--version` | Print version |
@@ -287,6 +294,9 @@ You can pass several folders at once:
   friends — but deliberately does *not* prune `packages/`, `dist/`, `build/`, `bin/` or
   `vendor/`. `packages/` is the standard monorepo layout, and pruning it would hide every
   workspace member.
+- **Already-excluded directories are counted, not listed.** The summary reports how many
+  were already being skipped; add `--show-excluded` to see which ones. Combine it with
+  `--dry-run` for a read-only audit of what Time Machine is currently ignoring.
 - **A failed exclusion does not abort the run.** The rest still get applied, failures are
   listed individually, and the script exits `1` if any failed.
 - **Excluding a directory does not delete it.** It only tells Time Machine to stop copying
@@ -304,34 +314,78 @@ tmignore 1.0.0 - a .gitignore for Time Machine
 Scanning ~/Projects (depth 6)...
 
 -- Project types found -------------------------------------
-  Node.js                  6
-  Rust                     1
-  React                    1
+  Node.js                  5
+  Rust                     2
+  React                    2
+  React Native / Expo      1
   Python                   1
+  Nuxt                     1
+  Next.js                  1
+  Go                       1
   Flutter / Dart           1
+  Android / Gradle         1
 
 -- Projects ------------------------------------------------
   Node.js
-    web                        ~/Projects/mono/packages/web
+    inner-proj                 ~/Projects/app/inner-proj
+    git-node                   ~/Projects/git-node
+    mono                       ~/Projects/mono
     api                        ~/Projects/mono/packages/api
+    web                        ~/Projects/mono/packages/web
+  React
+    plain-node                 ~/Projects/plain-node
+    tauri-app                  ~/Projects/tauri-app
+  Next.js
+    nextjs-app                 ~/Projects/nextjs-app
+  Nuxt
+    nuxt-app                   ~/Projects/nuxt-app
+  React Native / Expo
+    rn-app                     ~/Projects/rn-app
   Flutter / Dart
     flutter-app                ~/Projects/flutter-app
+  Android / Gradle
+    android                    ~/Projects/flutter-app/android
+  Python
+    py-app                     ~/Projects/py-app
   Rust
     rust-cli                   ~/Projects/rust-cli
+    tauri-app                  ~/Projects/tauri-app
+  Go
+    go-svc                     ~/Projects/go-svc
 
 -- Left alone (git tracks these, so they are not generated) --
   - node           ~/Projects/git-node/build
 
 -- To be excluded ------------------------------------------
-  + node           ~/Projects/mono/packages/web/node_modules
-  + node           ~/Projects/mono/packages/api/node_modules
+  + node           ~/Projects/app/inner-proj/dist
+  + node           ~/Projects/app/inner-proj/node_modules
   + flutter        ~/Projects/flutter-app/.dart_tool
+  + flutter        ~/Projects/flutter-app/android/.gradle
+  + flutter        ~/Projects/flutter-app/android/app/build
+  + flutter        ~/Projects/flutter-app/build
   + flutter        ~/Projects/flutter-app/ios/Pods
+  + node           ~/Projects/git-node/dist
+  + node           ~/Projects/git-node/node_modules
+  + go             ~/Projects/go-svc/bin
+  + node           ~/Projects/mono/packages/api/node_modules
+  + node           ~/Projects/mono/packages/web/node_modules
+  + nextjs         ~/Projects/nextjs-app/.next
+  + node           ~/Projects/nextjs-app/node_modules
+  + nuxt           ~/Projects/nuxt-app/.nuxt
+  + node           ~/Projects/nuxt-app/node_modules
+  + node           ~/Projects/plain-node/dist
+  + node           ~/Projects/plain-node/node_modules
+  + python         ~/Projects/py-app/.venv
+  + python         ~/Projects/py-app/__pycache__
+  + react_native   ~/Projects/rn-app/.expo
+  + node           ~/Projects/rn-app/node_modules
   + rust           ~/Projects/rust-cli/target
+  + node           ~/Projects/tauri-app/node_modules
+  + rust           ~/Projects/tauri-app/target
 
 -- Summary -------------------------------------------------
-  Projects found        11
-  To exclude            17
+  Projects found        15
+  To exclude            25
   Already excluded      0
   Left alone (in git)   1
 
